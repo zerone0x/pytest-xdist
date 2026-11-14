@@ -331,6 +331,15 @@ class LoadScopeScheduling:
         if node.shutting_down:
             return
 
+        # A node that has not submitted its collection yet (for example a
+        # replacement for a crashed worker that is still collecting) cannot
+        # be given work: its test indexes are unknown.  Assigning a work unit
+        # now would remove it from the workqueue without ever sending it,
+        # so the run would never finish.  The node gets work from
+        # ``.schedule()`` once its collection arrives.
+        if node not in self.registered_collections:
+            return
+
         # Check that more work is available
         if not self.workqueue:
             node.shutdown()

@@ -14,7 +14,9 @@ from xdist.dsession import get_workers_status_line
 from xdist.dsession import WorkerStatus
 from xdist.report import report_collection_diff
 from xdist.scheduler import EachScheduling
+from xdist.scheduler import LoadFileScheduling
 from xdist.scheduler import LoadScheduling
+from xdist.scheduler import LoadScopeScheduling
 from xdist.scheduler import WorkStealingScheduling
 from xdist.workermanage import WorkerController
 
@@ -465,6 +467,61 @@ class TestWorkStealingScheduling:
         rep = collect_hook.reports[0]
         assert isinstance(rep.longrepr, str)
         assert "Different tests were collected between" in rep.longrepr
+
+
+@pytest.mark.parametrize("scheduler_class", [LoadScopeScheduling, LoadFileScheduling])
+class TestLoadScopeScheduling:
+    def test_crash_while_replacement_node_is_collecting(
+        self,
+        pytester: pytest.Pytester,
+        scheduler_class: type[LoadScopeScheduling],
+    ) -> None:
+        """A worker crashing while the replacement of an earlier crashed worker
+        is still collecting must not hand work to the replacement before its
+        collection is known: that work would never be sent and the session
+        would hang."""
+        config = pytester.parseconfig("--tx=3*popen")
+        sched = scheduler_class(config)
+        node1, node2, node3 = MockNode(), MockNode(), MockNode()
+        collection = [f"test_m{i}.py::test_{j}" for i in range(8) for j in range(3)]
+        for node in (node1, node2, node3):
+            sched.add_node(node)
+            sched.add_node_collection(node, collection)
+        sched.schedule()
+        assert node2.sent == [3, 4, 5]
+        assert node3.sent == [6, 7, 8]
+
+        # node2 crashes and is replaced; the replacement has not collected yet.
+        assert sched.remove_node(node2) == "test_m1.py::test_0"
+        replacement = MockNode()
+        sched.add_node(replacement)
+
+        # node3 crashes before the replacement finishes collecting.
+        assert sched.remove_node(node3) == "test_m2.py::test_0"
+        assert replacement.sent == []
+        assert sched.assigned_work[replacement] == {}
+
+        # The replacement finishes collecting and gets work.
+        sched.add_node_collection(replacement, collection)
+        sched.schedule()
+        assert replacement.sent
+
+        # Let the remaining nodes run everything they are sent.
+        completed: dict[MockNode, int] = {node1: 0, replacement: 0}
+        while any(len(node.sent) > done for node, done in completed.items()):
+            for node in completed:
+                while len(node.sent) > completed[node]:
+                    index = node.sent[completed[node]]
+                    assert isinstance(index, int)
+                    sched.mark_test_complete(node, index)
+                    completed[node] += 1
+
+        assert not sched.workqueue
+        assert sched.tests_finished
+        assert not sched.has_pending
+        assert set(node1.sent) | set(replacement.sent) >= set(range(len(collection)))
+        assert node1.shutting_down
+        assert replacement.shutting_down
 
 
 class TestDistReporter:

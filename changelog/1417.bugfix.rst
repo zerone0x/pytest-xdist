@@ -1,0 +1,1 @@
+Fix hang with `--dist=loadscope`, `--dist=loadfile` and `--dist=loadgroup` when a worker crashes while the replacement of a previously crashed worker is still collecting.
