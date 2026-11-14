@@ -1,0 +1,1 @@
+Add a regression test for the hang with ``--dist=loadfile`` and ``--dist=loadscope`` when a crashed worker is replaced after the other worker was told to shut down.
