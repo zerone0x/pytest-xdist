@@ -1074,7 +1074,7 @@ class TestNodeFailure:
             [
                 "replacing crashed worker gw*",
                 "worker*crashed while running*test_crash_once*",
-                "*1 failed*",
+                "*1 failed, 15 passed*",
             ]
         )
 
