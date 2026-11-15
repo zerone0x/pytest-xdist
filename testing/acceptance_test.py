@@ -1032,6 +1032,52 @@ class TestNodeFailure:
             ]
         )
 
+    @pytest.mark.parametrize("dist", ["loadfile", "loadscope"])
+    def test_loadscope_does_not_hang_after_restart_with_other_workers(
+        self, pytester: pytest.Pytester, dist: str
+    ) -> None:
+        """Fix test suite never finishing when a worker crashes after having
+        finished a work unit and while holding another one, and the other
+        worker has already been told to shut down."""
+        pytester.makepyfile(
+            test_a="def test_a(): pass",
+            test_b="""
+            import pytest
+            @pytest.mark.parametrize('i', range(4))
+            def test_b(i): pass
+        """,
+            test_c="""
+            import os, time
+            def test_crash_once():
+                if not os.path.exists('crashed'):
+                    open('crashed', 'w').close()
+                    # Let the other worker finish the remaining work units.
+                    time.sleep(1)
+                    os._exit(1)
+        """,
+            test_d="def test_d(): pass",
+            test_e="""
+            import pytest
+            @pytest.mark.parametrize('i', range(4))
+            def test_e(i): pass
+        """,
+            test_f="""
+            import pytest
+            @pytest.mark.parametrize('i', range(4))
+            def test_f(i): pass
+        """,
+        )
+        res = pytester.runpytest_subprocess(
+            "-n2", f"--dist={dist}", "--no-loadscope-reorder", timeout=60
+        )
+        res.stdout.fnmatch_lines(
+            [
+                "replacing crashed worker gw*",
+                "worker*crashed while running*test_crash_once*",
+                "*1 failed, 15 passed*",
+            ]
+        )
+
     def test_max_worker_restart(self, pytester: pytest.Pytester) -> None:
         f = pytester.makepyfile(
             """
